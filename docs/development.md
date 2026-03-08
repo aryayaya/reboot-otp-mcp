@@ -3,6 +3,7 @@
 本文面向开发者，说明如何：
 
 - 构建 Go MCP server
+- 维护引导式安装脚本
 - 替换已安装 binary
 - 在不重启机器的前提下做 harmless 联调
 - 与 Picoclaw 集成验证
@@ -19,6 +20,7 @@
 当你需要做以下事情时，请看这份文档：
 
 - 修改 Go MCP server 源码
+- 维护 `scripts/install-reboot-otp.sh`
 - 本地构建新版本
 - 用新 binary 替换当前安装版本
 - 在不真的 reboot 的情况下验证整条链路
@@ -70,6 +72,8 @@
 
 - 仓库根目录：
   - `PROJECT_ROOT/`
+- 安装脚本：
+  - `PROJECT_ROOT/scripts/install-reboot-otp.sh`
 - Go MCP server 源码：
   - `PROJECT_ROOT/mcp-server/`
 - skill 源码：
@@ -110,7 +114,7 @@ GOTOOLCHAIN=go1.25.7 go build -o picoclaw-privileged-mcp
 
 - 本机 `/usr/bin/go` 可能是 toolchain launcher
 - 不要假设 `GOTOOLCHAIN=local` 一定落到 1.25.x
-- 本项目原型联调时使用的是 `GOTOOLCHAIN=go1.25.7`
+- 本项目应固定使用 `GOTOOLCHAIN=go1.25.7`
 
 构建后请确认：
 
@@ -120,7 +124,35 @@ GOTOOLCHAIN=go1.25.7 go build -o picoclaw-privileged-mcp
 
 ---
 
-## 6. 改源码后如何重建
+## 6. 引导安装脚本的维护原则
+
+入口脚本为：
+
+- `scripts/install-reboot-otp.sh`
+
+维护这个脚本时应坚持以下原则：
+
+- 只自动化确定性、可审计、可预览的步骤
+- 所有路径都要求显式绝对路径
+- 所有写入前都应先展示计算结果
+- 已存在 `~/.picoclaw/config.json` 时不要盲目 patch
+- sudoers 只打印推荐内容，不静默修改
+- 不要在脚本输出中回显 operator 输入的 OTP
+- 不要写入仓库内 secret 或构建产物
+
+### 如何验证脚本生成的输出
+
+至少要检查：
+
+- 渲染出的 MCP config snippet 与 `examples/picoclaw-config.example.json` 语义一致
+- 渲染出的 env 内容仍然以 `TOTP_SECRET` 为核心，并显式包含 `REBOOT_ACTION_MODE`
+- 渲染出的 sudoers line 仍只允许 `/usr/sbin/reboot`
+- skill 安装目标仍是 `TARGET_PROJECT/.claude/skills/reboot-guard/SKILL.md`
+- binary 仍使用 `GOTOOLCHAIN=go1.25.7` 构建
+
+---
+
+## 7. 改源码后如何重建
 
 每当你改动这些内容时，都应重新构建：
 
@@ -138,7 +170,7 @@ GOTOOLCHAIN=go1.25.7 go build -o picoclaw-privileged-mcp
 
 ---
 
-## 7. 安装开发版 binary
+## 8. 安装开发版 binary
 
 为了做本地集成测试，建议把开发版 binary 安装到与 Picoclaw config 一致的固定路径。
 
@@ -158,9 +190,17 @@ GOTOOLCHAIN=go1.25.7 go build -o picoclaw-privileged-mcp
 
 ---
 
-## 8. Harmless validation mode
+## 9. Harmless validation mode
 
 在测试真实 reboot 前，强烈建议先做 harmless validation。
+
+当前实现通过 env 文件中的：
+
+```env
+REBOOT_ACTION_MODE=harmless
+```
+
+切换到 harmless 模式。
 
 它的目的，是验证以下内容而不真的重启机器：
 
@@ -171,37 +211,27 @@ GOTOOLCHAIN=go1.25.7 go build -o picoclaw-privileged-mcp
 - 返回消息是否正确
 - Picoclaw 与 MCP 的集成是否正常
 
-### Harmless mode 的典型做法
+### Harmless mode 的当前行为
 
-临时把真实 reboot 执行路径替换成一个简单、可观察、但不会修改关键系统状态的 harmless command。
-
-原型联调时曾临时改成：
+在 harmless 模式下，正确 OTP 会执行一个无害测试命令，并返回：
 
 ```text
-printf "reboot ok\n"
+OTP verified. Reboot test command executed.
 ```
 
 仅在 harmless path 全部验证通过后，再切换回真实 reboot。
 
 ---
 
-## 9. 推荐开发测试顺序
-
-建议按以下顺序联调：
-
-1. 构建 binary
-2. 安装开发版 binary
-3. 重启 Picoclaw
-4. 测 malformed input
-5. 测 invalid OTP
-6. 在 harmless mode 下测试 valid OTP
-7. 切回真实 reboot mode
-
----
-
 ## 10. 从 harmless mode 切回真实 reboot
 
-当 harmless 验证完成后，再恢复真实动作：
+当 harmless 验证完成后，再把 env 文件改回：
+
+```env
+REBOOT_ACTION_MODE=real
+```
+
+此时正确 OTP 会重新进入：
 
 ```text
 sudo /usr/sbin/reboot
@@ -216,7 +246,23 @@ sudo /usr/sbin/reboot
 
 ---
 
-## 11. 如何确认 Picoclaw 已真正使用新版本
+## 11. 推荐开发测试顺序
+
+建议按以下顺序联调：
+
+1. 构建 binary
+2. 安装开发版 binary
+3. 运行引导安装脚本或手动同步 skill / config / env
+4. 重启 Picoclaw
+5. 测 malformed input
+6. 测 invalid OTP
+7. 测 missing `TOTP_SECRET`
+8. 在 harmless mode 下测试 valid OTP
+9. 切回真实 reboot mode
+
+---
+
+## 12. 如何确认 Picoclaw 已真正使用新版本
 
 你应该寻找这些证据：
 
@@ -233,7 +279,7 @@ sudo /usr/sbin/reboot
 
 ---
 
-## 12. 如何读服务日志
+## 13. 如何读服务日志
 
 当集成行为不符合预期时，应查看 Picoclaw service logs。
 
@@ -251,7 +297,7 @@ sudo /usr/sbin/reboot
 
 ---
 
-## 13. 安全调试原则
+## 14. 安全调试原则
 
 开发调试时，优先采用：
 
@@ -264,7 +310,7 @@ sudo /usr/sbin/reboot
 
 ---
 
-## 14. 面向发布的检查清单
+## 15. 面向发布的检查清单
 
 在你把某个版本视为“可用”之前，至少应确认：
 
@@ -278,3 +324,4 @@ sudo /usr/sbin/reboot
 - valid OTP 在目标模式下表现正确
 - 真实 reboot 前已做 harmless 验证
 - 文档仍与真实实现路径、文件名、命令路径一致
+- 引导安装脚本输出与 examples/ 文档保持一致

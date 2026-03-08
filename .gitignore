@@ -24,3 +24,6 @@ coverage.*
 
 # Local runtime artifacts
 *.log
+
+# Local installer scratch files
+*.tmp

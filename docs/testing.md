@@ -25,8 +25,10 @@
 - 最近一次改动后 Picoclaw 已重启
 - env 文件存在且包含 `TOTP_SECRET`
 - 手机认证器使用的 secret 与主机一致
-- 你知道当前 binary 是 harmless 还是 real reboot 版本
+- 你知道当前 binary 是 harmless 还是 real reboot 模式
 - 如果要测真实 reboot，sudoers 已允许精确 reboot 路径
+
+如果你使用了引导式安装脚本，它最后打印的 next steps 就应当直接指向本页测试顺序。
 
 ---
 
@@ -38,21 +40,16 @@
 2. missing OTP
 3. non-numeric 或错误长度 OTP
 4. 错误但格式合法的 OTP
-5. harmless mode 下的正确 OTP
-6. 路径一致性回归检查
-7. 真实 reboot 测试
+5. missing `TOTP_SECRET`
+6. harmless mode 下的正确 OTP
+7. 路径一致性回归检查
+8. 真实 reboot 测试
 
 ---
 
-## 3. 命令解析测试
+## 3. 安装后验证
 
-唯一支持的命令格式是：
-
-```text
-/reboot --otp 123456
-```
-
-### 测试：缺少 OTP
+### 3.1 测试：malformed input
 
 ```text
 /reboot
@@ -64,7 +61,7 @@
 Usage: /reboot --otp 123456
 ```
 
-### 测试：缺少 `--otp`
+### 3.2 测试：缺少 `--otp`
 
 ```text
 /reboot 123456
@@ -76,7 +73,7 @@ Usage: /reboot --otp 123456
 Usage: /reboot --otp 123456
 ```
 
-### 测试：多余 token
+### 3.3 测试：多余 token
 
 ```text
 /reboot --otp 123456 now
@@ -88,7 +85,7 @@ Usage: /reboot --otp 123456
 Usage: /reboot --otp 123456
 ```
 
-### 测试：非 6 位 OTP
+### 3.4 测试：非 6 位 OTP
 
 ```text
 /reboot --otp 12345
@@ -104,7 +101,7 @@ Usage: /reboot --otp 123456
 
 ## 4. OTP 拒绝测试
 
-### 测试：格式合法但值错误的 OTP
+### 4.1 测试：格式合法但值错误的 OTP
 
 ```text
 /reboot --otp 000000
@@ -120,7 +117,7 @@ OTP verification failed. Reboot request denied.
 
 - 不发生 reboot
 
-### 测试：缺少 `TOTP_SECRET`
+### 4.2 测试：缺少 `TOTP_SECRET`
 
 在未向 MCP server 提供 `TOTP_SECRET` 的情况下，请求应返回：
 
@@ -128,13 +125,25 @@ OTP verification failed. Reboot request denied.
 OTP verification is not configured.
 ```
 
+这一项很重要，因为它验证的是“未配置时显式失败”，而不是绕过 OTP。
+
 ---
 
 ## 5. Harmless mode 下的成功测试
 
 这是强烈推荐的端到端验证方式，应在真实 reboot 前完成。
 
-### 测试：harmless mode 下输入正确 OTP
+### 5.1 Harmless mode 是什么
+
+当前实现会从 env 文件读取：
+
+```env
+REBOOT_ACTION_MODE=harmless
+```
+
+在该模式下，正确 OTP 不会触发真实 reboot，而是执行一个无害测试命令，用于确认成功链路走通。
+
+### 5.2 测试：harmless mode 下输入正确 OTP
 
 ```text
 /reboot --otp 123456
@@ -148,7 +157,7 @@ OTP verification is not configured.
 - harmless command 被执行
 - 不发生真实 reboot
 
-原型联调中的一个典型成功消息可能是：
+预期成功消息：
 
 ```text
 OTP verified. Reboot test command executed.
@@ -170,16 +179,17 @@ OTP verified. Reboot test command executed.
 
 只有当 harmless mode 全部通过后，才建议执行这一测试。
 
-### 前置确认
+### 6.1 前置确认
 
 开始之前请确认：
 
-- 当前 binary 已切回真实 reboot mode
+- 当前 env 文件已切回：
+  - `REBOOT_ACTION_MODE=real`
 - 实现使用的是 `/usr/sbin/reboot`
 - sudoers 允许的是完全一致的路径
 - 你接受机器会立即重启
 
-### 测试：real mode 下输入正确 OTP
+### 6.2 测试：real mode 下输入正确 OTP
 
 ```text
 /reboot --otp 123456
@@ -226,6 +236,7 @@ OTP verified. System is rebooting.
 - 代码中的 reboot 路径
 - sudoers 中的 reboot 路径
 - `config.json` 中的 binary 路径
+- `config.json` 中的 env_file 路径
 
 ---
 
@@ -254,7 +265,8 @@ OTP verified. System is rebooting.
 - 正确 OTP 能在 harmless mode 下先通过
 - 明确启用 real reboot 后，正确 OTP 才触发真实 reboot
 - 机器只会在预期成功路径下重启
-- 响应中不泄漏 secret
-- 日志中不泄漏 secret
+- 响应中不泄漏 OTP
+- 日志中不泄漏 OTP
+- 日志中不泄漏 `TOTP_SECRET`
 - 命令面仍然保持狭窄
 - 没有出现通用高权限执行路径

@@ -3,10 +3,19 @@ package reboot
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
 	"picoclaw-privileged-mcp/internal/security"
+)
+
+const (
+	realMode             = "real"
+	harmlessMode         = "harmless"
+	harmlessCommandPath  = "/usr/bin/printf"
+	harmlessCommandArg   = "reboot ok\n"
+	harmlessSuccessReply = "OTP verified. Reboot test command executed."
 )
 
 type Service struct {
@@ -31,12 +40,31 @@ func (s *Service) Reboot(ctx context.Context, otp string) (string, error) {
 		return "OTP verification failed. Reboot request denied.", err
 	}
 
-	cmd := exec.CommandContext(ctx, "sudo", s.rebootPath)
+	mode := actionMode()
+	cmd := commandForMode(ctx, mode, s.rebootPath)
 	if err := cmd.Start(); err != nil {
 		return "Failed to execute reboot.", err
 	}
 
+	if mode == harmlessMode {
+		return harmlessSuccessReply, nil
+	}
 	return "OTP verified. System is rebooting.", nil
+}
+
+func actionMode() string {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("REBOOT_ACTION_MODE")))
+	if mode == harmlessMode {
+		return harmlessMode
+	}
+	return realMode
+}
+
+func commandForMode(ctx context.Context, mode, rebootPath string) *exec.Cmd {
+	if mode == harmlessMode {
+		return exec.CommandContext(ctx, harmlessCommandPath, harmlessCommandArg)
+	}
+	return exec.CommandContext(ctx, "sudo", rebootPath)
 }
 
 func isSixDigits(v string) bool {

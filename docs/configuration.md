@@ -38,10 +38,14 @@ Telegram / chat input
 
 ### 本仓库中的源码路径
 
+- 安装脚本：
+  - `scripts/install-reboot-otp.sh`
 - Picoclaw config 示例：
   - `examples/picoclaw-config.example.json`
 - env 示例：
   - `examples/privileged.env.example`
+- sudoers 示例：
+  - `examples/sudoers.example`
 - skill 源码：
   - `skills/reboot-guard/SKILL.md`
 - MCP 源码：
@@ -67,7 +71,82 @@ Telegram / chat input
 
 ---
 
-## 3. Picoclaw MCP 配置
+## 3. 安装脚本可能写哪些文件
+
+引导式安装脚本的默认入口为：
+
+- `scripts/install-reboot-otp.sh`
+
+它遵循“能安全自动化的才写，脆弱或高风险的只打印”的原则。
+
+### 可能由脚本写入
+
+- 安装后的 binary：
+  - 默认 `/usr/local/bin/picoclaw-privileged-mcp`
+- 目标项目 skill：
+  - `TARGET_PROJECT/.claude/skills/reboot-guard/SKILL.md`
+- secret env 文件：
+  - 默认 `~/.picoclaw/secrets/privileged.env`
+  - 仅在你明确确认后写入
+- 新的最小 Picoclaw config：
+  - `~/.picoclaw/config.json`
+  - 仅当该文件当前不存在，且你明确确认后创建
+
+### 只会打印、不会自动写入
+
+- sudoers 规则
+- 已存在 `~/.picoclaw/config.json` 时的 MCP JSON 片段
+
+这意味着：
+
+- 脚本不会静默扩大 sudoers 权限
+- 脚本不会盲目 patch 复杂 JSON
+
+---
+
+## 4. 安装脚本的默认值
+
+安装脚本默认使用：
+
+- binary path：
+  - `/usr/local/bin/picoclaw-privileged-mcp`
+- Picoclaw config path：
+  - `~/.picoclaw/config.json`
+- env file path：
+  - `~/.picoclaw/secrets/privileged.env`
+- deployed skill path：
+  - `TARGET_PROJECT/.claude/skills/reboot-guard/SKILL.md`
+- required reboot path：
+  - `/usr/sbin/reboot`
+- Go toolchain for build：
+  - `GOTOOLCHAIN=go1.25.7`
+- default action mode：
+  - `harmless`
+
+### Action mode
+
+env 文件除了 `TOTP_SECRET` 之外，还会包含：
+
+```env
+REBOOT_ACTION_MODE=harmless
+```
+
+或：
+
+```env
+REBOOT_ACTION_MODE=real
+```
+
+其中：
+
+- `harmless`：验证成功路径但不真实 reboot
+- `real`：正确 OTP 最终执行 `sudo /usr/sbin/reboot`
+
+任何非 `harmless` 值都会按 real 模式处理，因此建议只使用这两个显式值。
+
+---
+
+## 5. Picoclaw MCP 配置
 
 编辑：
 
@@ -161,7 +240,7 @@ Telegram / chat input
 "env_file": "/home/YOUR_USER/.picoclaw/secrets/privileged.env"
 ```
 
-这个文件会为 MCP server 提供 `TOTP_SECRET`。
+这个文件会为 MCP server 提供 `TOTP_SECRET` 和 `REBOOT_ACTION_MODE`。
 
 ### 重要注意事项
 
@@ -172,7 +251,7 @@ Telegram / chat input
 
 ---
 
-## 4. Secret env 文件
+## 6. Secret env 文件
 
 创建：
 
@@ -184,11 +263,17 @@ Telegram / chat input
 
 - `examples/privileged.env.example`
 
+最小运行内容应为：
+
 ```env
 TOTP_SECRET=YOUR_BASE32_SECRET_HERE
+REBOOT_ACTION_MODE=harmless
 ```
 
-该值必须与你手机认证器中使用的 TOTP secret 一致。
+该值中的：
+
+- `TOTP_SECRET` 必须与你手机认证器中使用的 TOTP secret 一致
+- `REBOOT_ACTION_MODE` 用于控制当前是 harmless 还是 real path
 
 ### 要求
 
@@ -222,7 +307,7 @@ TOTP_SECRET=YOUR_BASE32_SECRET_HERE
 
 ---
 
-## 5. 本地 skill
+## 7. 本地 skill
 
 ### 源码路径
 
@@ -289,7 +374,24 @@ Never broaden this into general privileged command execution.
 
 ---
 
-## 6. 路径一致性要求
+## 8. 示例文件与安装脚本的关系
+
+以下示例文件仍然是 source-of-truth 模板：
+
+- `examples/picoclaw-config.example.json`
+- `examples/privileged.env.example`
+- `examples/sudoers.example`
+
+安装脚本输出的配置应与它们在语义上保持一致：
+
+- MCP server 名称仍为 `privileged`
+- command 仍指向安装后的 MCP binary
+- env_file 仍指向 `~/.picoclaw/secrets/privileged.env` 这类私有文件
+- sudoers 仍只允许 `/usr/sbin/reboot`
+
+---
+
+## 9. 路径一致性要求
 
 这个方案对路径一致性要求很高。请至少确认以下几项完全一致：
 
@@ -325,41 +427,11 @@ TARGET_PROJECT/.claude/skills/reboot-guard/SKILL.md
 /usr/sbin/reboot
 ```
 
-如果 `which reboot` 给出不同路径，不要直接继续，请先同步修改实现与 sudoers 文档。
+如果主机实际路径不同，不要直接继续，请先同步修改实现与 sudoers 文档，而不是让安装脚本猜测。
 
 ---
 
-## 7. 最小端到端示例
-
-### Picoclaw config
-
-见：
-
-- `examples/picoclaw-config.example.json`
-
-### Secret env 文件
-
-见：
-
-- `examples/privileged.env.example`
-
-### Skill 文件
-
-源文件位于：
-
-- `skills/reboot-guard/SKILL.md`
-
-部署后位于：
-
-- `TARGET_PROJECT/.claude/skills/reboot-guard/SKILL.md`
-
-### 重要警告
-
-示例文件中的占位值仅用于演示，不应直接复制到真实部署中。
-
----
-
-## 8. 验证检查清单
+## 10. 验证检查清单
 
 在真正测试 reboot 前，请确认：
 
@@ -369,6 +441,7 @@ TARGET_PROJECT/.claude/skills/reboot-guard/SKILL.md
 - `command` 指向的文件可执行
 - `env_file` 路径存在
 - `env_file` 中包含 `TOTP_SECRET`
+- 当前 `REBOOT_ACTION_MODE` 符合你的测试意图
 - 目标项目内存在 `.claude/skills/reboot-guard/SKILL.md`
 - Picoclaw 已在配置变更后重启
 - 运行 Picoclaw 的用户能读取 env 文件
@@ -376,7 +449,7 @@ TARGET_PROJECT/.claude/skills/reboot-guard/SKILL.md
 
 ---
 
-## 9. 常见配置错误
+## 11. 常见配置错误
 
 ### MCP 没有真正启用
 
@@ -399,6 +472,16 @@ Picoclaw 根本不会加载 server。
 ```text
 OTP verification is not configured.
 ```
+
+### Action mode 搞错
+
+如果本来想先 harmless 验证，但 env 文件里写成了：
+
+```env
+REBOOT_ACTION_MODE=real
+```
+
+那么正确 OTP 会直接进入真实 reboot 路径。
 
 ### Skill 装在了错误项目里
 
