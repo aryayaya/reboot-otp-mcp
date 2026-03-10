@@ -1,3 +1,7 @@
+思路：
+clawhub装totp的skill + mcp + 增加sudoer NOPASS 
+
+
 # Picoclaw Reboot OTP MCP
 
 语言 / Language: **中文** | [English](./README.en.md)
